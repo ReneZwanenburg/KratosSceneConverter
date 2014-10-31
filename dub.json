@@ -1,0 +1,28 @@
+{
+	"name": "kratossceneconverter",
+	"description": "A minimal D application.",
+	"copyright": "Copyright © 2014, Rene",
+	"authors": ["Rene"],
+
+	"targetPath": "build",
+
+	"versions": [
+		"KratosCustomMain"
+	],
+
+	"copyFiles-windows-x86":
+	[
+		"lib/windows/x86/assimp.dll"
+	],
+	"copyFiles-windows-x86_64":
+	[
+		"lib/windows/x86_64/assimp.dll"
+	],
+	
+	"dependencies": {
+		"derelict-assimp3": "~>1.0",
+		"kratos": { "version": "~master", "path": "../Kratos" },
+		"vibe-d": { "version": "~master", "path": "../vibe.d" },
+		"kgl3n": { "version": "~master", "path": "../kgl3n" }
+	}
+}
