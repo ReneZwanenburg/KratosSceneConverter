@@ -18,6 +18,14 @@ import std.file;
 import std.stdio : File;
 import std.stdio : writeln;
 
+class ImportFailedException : Exception
+{
+	this(string msg)
+	{
+		super(msg);
+	}
+}
+
 struct ImportedMesh
 {
 	VertexAttributes attributes;
@@ -43,14 +51,14 @@ void convertScene(string inputPath, string outputBaseName, string outputBasePath
 		aiProcess_FindInstances
 	);
 
-	enforce(importedScene, "Error while loading scene");
+	if(!importedScene) throw new ImportFailedException("Failed to load scene");
 	scope(exit) aiReleaseImport(importedScene);
 
 	auto importedMeshes = importedScene.mMeshes[0 .. importedScene.mNumMeshes].map!(a => importMesh(a)).array;
 	auto importedMaterials = importedScene.mMaterials[0 .. importedScene.mNumMaterials].map!(a => importMaterial(a)).array;
 
 	string[ImportedMesh] savedMeshes;
-	string[Json] savedMaterials;
+	string[size_t] savedMaterials;
 	bool[string] takenNames;
 
 	auto scenePath = outputBaseName.stripExtension;
@@ -73,7 +81,7 @@ void convertScene(string inputPath, string outputBaseName, string outputBasePath
 		mkdirRecurse(fullPath.dirName);
 		auto outFile = File(fullPath, "w");
 		outFile.rawWrite([mesh.attributes]);
-		outFile.rawWrite([mesh.vertexStream.length]);
+		outFile.rawWrite([mesh.vertexStream.length * float.sizeof]);
 		outFile.rawWrite([mesh.indexType]);
 		outFile.rawWrite([mesh.indexStream.length]);
 		outFile.rawWrite(mesh.vertexStream);
@@ -82,7 +90,7 @@ void convertScene(string inputPath, string outputBaseName, string outputBasePath
 		return meshPath;
 	}
 
-	string saveMaterial(Json material, string baseName)
+	string saveMaterial(Json material, string baseName, size_t index)
 	{
 		auto materialPath = buildNormalizedPath("RenderStates", baseName ~ ".renderstate").replace("\\", "/");
 		for(int i = 0; materialPath in takenNames; ++i)
@@ -90,7 +98,7 @@ void convertScene(string inputPath, string outputBaseName, string outputBasePath
 			materialPath = buildNormalizedPath("RenderStates", baseName ~ "_" ~ i.text ~ ".renderstate").replace("\\", "/");
 		}
 		takenNames[materialPath] = true;
-		savedMaterials[material] = materialPath;
+		savedMaterials[index] = materialPath;
 		writeln("Material Path: ", materialPath);
 
 		auto fullPath = buildNormalizedPath(outputBasePath, materialPath);
@@ -98,6 +106,16 @@ void convertScene(string inputPath, string outputBaseName, string outputBasePath
 		write(fullPath, material.toPrettyString);
 		
 		return materialPath;
+	}
+
+	foreach(mesh; importedMeshes)
+	{
+		saveMesh(mesh, buildPath(scenePath, "Mesh"));
+	}
+
+	foreach(i, material; importedMaterials)
+	{
+		saveMaterial(material, buildPath(scenePath, "Material"), i);
 	}
 
 	void loadNode(const aiNode* node, Transform parent)
@@ -125,13 +143,13 @@ void convertScene(string inputPath, string outputBaseName, string outputBasePath
 				meshPath = saveMesh(importedMeshes[importedMeshIndex], baseSaveName);
 			}
 
-			if(auto pathPtr = importedMaterials[importedMaterialIndex] in savedMaterials)
+			if(auto pathPtr = importedMaterialIndex in savedMaterials)
 			{
 				materialPath = *pathPtr;
 			}
 			else
 			{
-				materialPath = saveMaterial(importedMaterials[importedMaterialIndex], baseSaveName);
+				materialPath = saveMaterial(importedMaterials[importedMaterialIndex], baseSaveName, importedMaterialIndex);
 			}
 
 			Mesh mesh;
@@ -197,7 +215,7 @@ ImportedMesh importMesh(const aiMesh* mesh)
 		foreach(i; 0..mesh.mNumFaces)
 		{
 			auto face = mesh.mFaces[i];
-			assert(face.mNumIndices == 3);
+			if(face.mNumIndices != 3) continue;
 			foreach(index; face.mIndices[0 .. face.mNumIndices])
 			{
 				import std.conv;
@@ -230,7 +248,7 @@ Json importMaterial(const aiMaterial* material)
 {
 	auto json = Json.emptyObject;
 	json["parent"] = "RenderStates/DefaultImport.renderstate";
-	auto uniforms = json["uniforms"] = Json.emptyObject;
+	auto uniforms = Json.emptyObject;
 
 	static struct TextureProperties
 	{
@@ -248,7 +266,10 @@ Json importMaterial(const aiMaterial* material)
 		aiString path;
 		if(aiGetMaterialTexture(material, properties.textureType, 0, &path) == aiReturn_SUCCESS)
 		{
-			uniforms[properties.uniformName] = path.data[0..path.length].idup;
+			if(path.length > 0) // For whatever reason, an empty path is sometimes returned. Ignore those textures.
+			{
+				uniforms[properties.uniformName] = buildNormalizedPath(path.data[0..path.length]).replace("\\", "/");
+			}
 		}
 	}
 	
@@ -265,6 +286,8 @@ Json importMaterial(const aiMaterial* material)
 	uniforms["diffuseColor"] = serializeToJson(diffuseColor);
 	uniforms["specularColor"] = serializeToJson(specularColor);
 	uniforms["emissiveColor"] = serializeToJson(emissiveColor.rgb);
+
+	json["uniforms"] = uniforms;
 
 	return json;
 }

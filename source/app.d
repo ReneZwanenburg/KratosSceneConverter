@@ -10,6 +10,11 @@ void main(string[] args)
 	foreach(sceneFile; dirEntries(inputDir, SpanMode.breadth))
 	{
 		auto inputPath = relativePath(sceneFile.name);
-		convertScene(inputPath, relativePath(sceneFile.name, inputDir), outputDir);
+		try convertScene(inputPath, relativePath(sceneFile.name, inputDir), outputDir);
+		catch(ImportFailedException e)
+		{
+			import std.stdio;
+			writeln("Failed to load ", sceneFile.name, " as scene, skipping..");
+		}
 	}
 }
